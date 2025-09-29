@@ -1,0 +1,21 @@
+[project]
+name = "jane-street-puzzles"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Quinn Flavel", email = "quinnydf@yahoo.ca" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "cpmpy>=0.9.26",
+    "numpy>=2.3.3",
+    "rich>=14.1.0",
+]
+
+[project.scripts]
+jane-street-puzzles = "jane_street_puzzles:main"
+
+[build-system]
+requires = ["uv_build>=0.8.14,<0.9.0"]
+build-backend = "uv_build"

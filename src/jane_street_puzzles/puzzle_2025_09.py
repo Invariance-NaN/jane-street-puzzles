@@ -1,0 +1,395 @@
+import cpmpy as cp
+import math
+import numpy as np
+import rich
+from jane_street_puzzles.utils.grids import BooleanGrid, IntGrid
+from jane_street_puzzles.utils.polyominos import PENTOMINOS
+
+class Hook:
+    """
+    An L-shaped hook of given size and any orientation, placed somewhere in a grid of given dimensions.
+    """
+    def __init__(self, model: cp.Model, hook_size: int, grid_width: int, grid_height: int) -> None:
+        self.model = model
+        self.grid = BooleanGrid(model, grid_height, grid_width)
+        self.hook_size = hook_size
+
+        upper_not_lower = cp.boolvar()
+        left_not_right = cp.boolvar()
+
+        # The hook is placed with its upper-left cell these coordinates.
+        hook_i = cp.intvar(0, grid_height - self.hook_size)
+        hook_j = cp.intvar(0, grid_width - self.hook_size)
+
+        for i in range(grid_height):
+            for j in range(grid_width):
+                horizontal_bar_upper = [
+                    upper_not_lower,
+                    i == hook_i, hook_j <= j, j < hook_j + self.hook_size,
+                ]
+
+                horizontal_bar_lower = [
+                    ~upper_not_lower,
+                    i == hook_i + self.hook_size - 1, hook_j <= j, j < hook_j + self.hook_size,
+                ]
+
+                vertical_bar_left = [
+                    left_not_right,
+                    j == hook_j, hook_i <= i, i < hook_i + self.hook_size,
+                ]
+
+                vertical_bar_right = [
+                    ~left_not_right,
+                    j == hook_j + self.hook_size - 1, hook_i <= i, i < hook_i + self.hook_size,
+                ]
+
+                # Each cell is covered iff it is in one of the bars.
+                self.model += self.grid[i, j] == cp.any([
+                    cp.all(horizontal_bar_upper),
+                    cp.all(horizontal_bar_lower),
+                    cp.all(vertical_bar_left),
+                    cp.all(vertical_bar_right)
+                ])
+
+class FilledHook:
+    """
+    A `Hook` with a certain number of its cells (`self.filled_count`) filled in.
+    """
+    def __init__(self, model: cp.Model, hook_size: int, grid_width: int, grid_height: int, *, lb: int, ub: int) -> None:
+        self.model = model
+        self.hook = Hook(model, hook_size, grid_width, grid_height)
+        self.grid = self.hook.grid
+        self.filled_grid = BooleanGrid(model, grid_height, grid_width)
+        self.filled_count = cp.intvar(lb, ub)
+
+        model += self.grid.covers(self.filled_grid)
+        model += cp.sum(self.filled_grid.cells) == self.filled_count
+
+class OptionalPentomino:
+    """
+    A pentomino of a given type, possibly placed somewhere in a grid of given dimensions.
+    """
+
+    def __init__(self, model: cp.Model, pentomino_name: str, grid_width: int, grid_height: int) -> None:
+        assert pentomino_name in PENTOMINOS, f"Unknown pentomino name: {pentomino_name}"
+
+        self.model = model
+        self.pentomino_name = pentomino_name
+
+        self.grid = BooleanGrid(model, grid_height, grid_width)
+        self.is_placed = cp.boolvar()
+
+        orientations = PENTOMINOS[pentomino_name]
+
+        orientation_idx = cp.intvar(0, len(orientations) - 1)
+        pos_i = cp.intvar(0, grid_width - 1)
+        pos_j = cp.intvar(0, grid_height - 1)
+
+        model += (~self.is_placed).implies(self.grid.is_empty())
+
+        for idx, coords in enumerate(orientations):
+            orientation_placed = self.is_placed & (orientation_idx == idx)
+
+            max_i = max(i for i, _ in coords)
+            max_j = max(j for _, j in coords)
+
+            fits_in_grid = (pos_i + max_i < grid_height) & (pos_j + max_j < grid_width)
+            model += orientation_placed.implies(fits_in_grid)
+
+            def cell_is_filled(i: int, j: int):
+                return cp.any(                    [
+                    (pos_i + coord_1 == i) & (pos_j + coord_2 == j)
+                    for coord_1, coord_2 in coords
+                ])
+
+            model += orientation_placed.implies(self.grid.each_eq(cell_is_filled))
+
+def no_2x2_block(grid: BooleanGrid):
+    return cp.all(
+        [
+            cp.sum([grid[i, j], grid[i, j + 1], grid[i + 1, j], grid[i + 1, j + 1]]) <= 3
+            for i in range(grid.width - 1)
+            for j in range(grid.height - 1)
+        ]
+    )
+
+class Puzzle:
+    def __init__(self, grid_size: int):
+        model = cp.Model()
+
+        # Empty cells are represented by 0
+        numbers = IntGrid(model, grid_size, grid_size, lb=0, ub=grid_size)
+
+        # Create valid hooks
+        hooks = [FilledHook(model, hook_size, grid_size, grid_size, lb=1, ub=grid_size) for hook_size in range(1, grid_size + 1)]
+        model += BooleanGrid.are_disjoint([hook.grid for hook in hooks])
+        model += cp.AllDifferent(hook.filled_count for hook in hooks)
+
+        # Link hooks to numbers grid
+        model += cp.all(
+            (
+                hook.grid.excluding(hook.filled_grid).each_implies(lambda i, j: numbers[i, j] == 0) &
+                hook.filled_grid.each_implies(lambda i, j: numbers[i, j] == hook.filled_count)
+            )
+            for hook in hooks
+        )
+
+        # Constraints on the numbers grid
+        model += no_2x2_block(numbers.nonzero_view)
+        model += numbers.nonzero_view.is_connected()
+
+        pentominos = { name: OptionalPentomino(model, name, grid_size, grid_size) for name in PENTOMINOS.keys() }
+        model += BooleanGrid.are_disjoint([pentomino.grid for pentomino in pentominos.values()])
+        model += BooleanGrid.equals(
+            BooleanGrid.union([pentomino.grid for pentomino in pentominos.values()]),
+            numbers.nonzero_view
+        )
+
+        for pentomino in pentominos.values():
+            # Ensure the numbers in the pentomino sum to a multiple of 5.
+            # (If the pentomino isn't placed, then the sum will be 0 and hence a multiple of 5.)
+            pentomino_sum = cp.sum(
+                [
+                    pentomino.grid[i, j] * numbers[i, j]
+                    for i in range(grid_size)
+                    for j in range(grid_size)
+                ]
+            )
+            model += pentomino_sum % 5 == 0
+
+        self.grid_size = grid_size
+        self.model = model
+        self.hooks = hooks
+        self.numbers = numbers
+        self.pentominos = pentominos
+
+    def solution(self):
+        if not self.model.solve():
+            return None
+
+        # The solution is the product of the areas of the empty (zero) regions in self.numbers
+
+        filled_grid = self.numbers.nonzero_view.value()
+        visited = np.zeros_like(filled_grid, dtype=bool)
+
+        def flood_fill(start_i, start_j):
+            if visited[start_i, start_j] or filled_grid[start_i, start_j]:
+                return 0
+
+            area = 0
+            to_check = [(start_i, start_j)]
+
+            while to_check:
+                i, j = to_check.pop()
+                if i < 0 or i >= self.grid_size or j < 0 or j >= self.grid_size or visited[i, j] or filled_grid[i, j]:
+                    continue
+
+                visited[i, j] = True
+                area += 1
+
+                for di, dj in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                    to_check.append((i + di, j + dj))
+
+            return area
+
+        areas = [
+            flood_fill(i, j)
+            for i in range(self.grid_size)
+            for j in range(self.grid_size)
+        ]
+
+        return math.prod(x for x in areas if x != 0)
+
+    def print_solution(self):
+        """
+        Just for fun, a pretty-printer that uses constraint programming to format the grid.
+        """
+
+        BOX_CHARS = {
+            # (Up, Down, Left, Right)
+            (False, False, False, False): " ",
+            (False, False, False, True ): "╶",
+            (False, False, True , False): "╴",
+            (False, False, True , True ): "─",
+            (False, True , False, False): "╷",
+            (False, True , False, True ): "┌",
+            (False, True , True , False): "┐",
+            (False, True , True , True ): "┬",
+            (True , False, False, False): "╵",
+            (True , False, False, True ): "└",
+            (True , False, True , False): "┘",
+            (True , False, True , True ): "┴",
+            (True , True , False, False): "│",
+            (True , True , False, True ): "├",
+            (True , True , True , False): "┤",
+            (True , True , True , True ): "┼",
+        }
+
+
+        solution = self.solution()
+
+        if solution is None:
+            rich.print("[red]No solution found[/red]")
+            return
+
+        printing_model = cp.Model()
+        connects_up    = BooleanGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
+        connects_down  = BooleanGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
+        connects_left  = BooleanGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
+        connects_right = BooleanGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
+        printing_model.minimize(
+            cp.sum(connects_up.cells) +
+            cp.sum(connects_down.cells) +
+            cp.sum(connects_left.cells) +
+            cp.sum(connects_right.cells)
+        )
+
+        vertical = BooleanGrid.intersection([connects_up, connects_down])
+        horizontal = BooleanGrid.intersection([connects_left, connects_right])
+        has_box_char = BooleanGrid.union([connects_up, connects_down, connects_left, connects_right])
+
+        printing_model += cp.all([
+            connects_down[i, j] == connects_up[i + 1, j]
+            for i in range(self.grid_size * 2)
+            for j in range(self.grid_size * 4 + 1)
+        ])
+
+        printing_model += cp.all([
+            connects_right[i, j] == connects_left[i, j + 1]
+            for i in range(self.grid_size * 2 + 1)
+            for j in range(self.grid_size * 4)
+        ])
+
+        output_grid = np.array([
+            [" " for _ in range(self.grid_size * 4 + 1)]
+            for _ in range(self.grid_size * 2 + 1)
+        ], dtype='U50')
+
+        pentomino_colors = {
+            "F": "red",
+            "I": "green",
+            "L": "yellow",
+            "N": "blue",
+            "P": "magenta",
+            "T": "cyan",
+            "U": "slate_blue1",
+            "V": "cyan2",
+            "W": "medium_purple1",
+            "X": "honeydew2",
+            "Y": "magenta3",
+            "Z": "dark_orange3"
+        }
+
+        def get_pentomino_for_cell(i: int, j: int) -> str | None:
+            for name, pentomino in self.pentominos.items():
+                if pentomino.grid[i, j].value():
+                    return name
+            return None
+
+        for i, row in enumerate(self.numbers.value()):
+            for j, x in enumerate(row):
+                char = "·" if x == 0 else str(x)
+                assert len(char) == 1, "Multi-digit numbers not supported in pretty printer"
+
+                pentomino_name = get_pentomino_for_cell(i, j)
+                if pentomino_name is not None:
+                    color = pentomino_colors[pentomino_name]
+                    output_grid[i * 2 + 1][j * 4 + 2] = f"[{color}]{char}[/{color}]"
+                else:
+                    output_grid[i * 2 + 1][j * 4 + 2] = char
+
+        for i in range(1, self.grid_size * 2):
+            printing_model += vertical[i, 0]
+            printing_model += vertical[i, -1]
+
+        for j in range(1, self.grid_size * 4):
+            printing_model += horizontal[0, j]
+            printing_model += horizontal[-1, j]
+
+
+        for hook in self.hooks:
+            for x in range(self.grid_size):
+                for y in range(self.grid_size - 1):
+                    if hook.grid[x, y].value() ^ hook.grid[x, y + 1].value():
+                        printing_model += vertical[x * 2 + 1, y * 4 + 4]
+
+                    if hook.grid[y, x].value() ^ hook.grid[y + 1, x].value():
+                        printing_model += horizontal[y * 2 + 2, x * 4 + 1]
+                        printing_model += horizontal[y * 2 + 2, x * 4 + 2]
+                        printing_model += horizontal[y * 2 + 2, x * 4 + 3]
+
+        assert printing_model.solve()
+
+        for i, row in enumerate(has_box_char.cells):
+            for j, has_char in enumerate(row):
+                if not has_char.value():
+                    continue
+                output_grid[i, j] = BOX_CHARS[
+                    connects_up[i, j].value(),
+                    connects_down[i, j].value(),
+                    connects_left[i, j].value(),
+                    connects_right[i, j].value()
+                ]
+
+
+        for row in output_grid:
+            rich.print("".join(row))
+
+        print("Final answer (product of areas of empty regions):", solution)
+
+# Puzzle instances
+
+def example():
+    puzzle = Puzzle(5)
+    is_filled = puzzle.numbers.nonzero_view
+
+    puzzle.model += cp.all([
+        puzzle.numbers[0, 4] == 4,
+        puzzle.numbers[1, 2] == 3,
+        puzzle.numbers[2, 0] == 3,
+        puzzle.numbers[2, 1] == 2,
+        puzzle.numbers[3, 2] == 1,
+        puzzle.numbers[4, 4] == 4,
+        puzzle.pentominos["U"].grid[0, is_filled.first_row_idx(0)] > 0,
+        puzzle.pentominos["U"].grid[1, is_filled.last_row_idx(1)] > 0,
+        puzzle.pentominos["F"].grid[3, is_filled.last_row_idx(3)] > 0,
+        puzzle.pentominos["Y"].grid[4, is_filled.first_row_idx(4)] > 0
+    ])
+
+    return puzzle
+
+def hooks_11():
+    puzzle = Puzzle(9)
+    is_filled = puzzle.numbers.nonzero_view
+
+    puzzle.model += cp.all([
+        puzzle.numbers[0, 4] == 5,
+        puzzle.numbers[1, 3] == 4,
+        puzzle.numbers[4, 4] == 1,
+        puzzle.numbers[7, 5] == 8,
+        puzzle.numbers[8, 4] == 9,
+        puzzle.pentominos["I"].grid[0, is_filled.first_row_idx(0)] > 0,
+        puzzle.pentominos["U"].grid[0, is_filled.last_row_idx(0)] > 0,
+        puzzle.pentominos["X"].grid[3, is_filled.last_row_idx(3)] > 0,
+        puzzle.pentominos["N"].grid[5, is_filled.first_row_idx(5)] > 0,
+        puzzle.pentominos["Z"].grid[8, is_filled.first_row_idx(8)] > 0,
+        puzzle.pentominos["V"].grid[8, is_filled.last_row_idx(8)] > 0,
+        puzzle.numbers[3, is_filled.first_row_idx(3)] == 6,
+        puzzle.numbers[5, is_filled.last_row_idx(5)] == 2,
+        puzzle.numbers[is_filled.last_col_idx(2), 2] == 3,
+        puzzle.numbers[is_filled.first_col_idx(6), 6] == 7
+    ])
+
+    return puzzle
+
+def main():
+    print("Solving jane-street puzzle 2025-09 (Hooks 11)...")
+
+    print("Example solution:")
+    example().print_solution()
+    print()
+    print("Puzzle solution:")
+    hooks_11().print_solution()
+
+if __name__ == "__main__":
+    main()
