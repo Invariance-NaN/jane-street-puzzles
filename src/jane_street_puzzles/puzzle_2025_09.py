@@ -163,6 +163,39 @@ class Puzzle:
         self.numbers = numbers
         self.pentominos = pentominos
 
+    def digit_hint(self, *, i: int, j: int, value: int):
+        self.model += self.numbers[i, j] == value
+
+    def _edge_hint(self, *, idx: int, is_row: bool, is_first: bool, hint: int | str):
+        is_number = isinstance(hint, int)
+        assert is_number or hint in self.pentominos
+
+        is_filled = self.numbers.nonzero_view
+
+        grid = self.numbers if is_number else self.pentominos[hint].grid
+        value = hint if is_number else 1
+
+        match (is_row, is_first):
+            case (True, True):
+                i, j = idx, is_filled.first_row_idx(idx)
+            case (True, False):
+                i, j = idx, is_filled.last_row_idx(idx)
+            case (False, True):
+                i, j = is_filled.last_col_idx(idx), idx
+            case (False, False):
+                i, j = is_filled.first_col_idx(idx), idx
+
+        self.model += grid[i, j] == value
+
+    def edge_hint_left(self, *, i: int, hint: int | str):
+        self._edge_hint(idx=i, is_row=True, is_first=True, hint=hint)
+    def edge_hint_right(self, *, i: int, hint: int | str):
+        self._edge_hint(idx=i, is_row=True, is_first=False, hint=hint)
+    def edge_hint_top(self, *, j: int, hint: int | str):
+        self._edge_hint(idx=j, is_row=False, is_first=True, hint=hint)
+    def edge_hint_bottom(self, *, j: int, hint: int | str):
+        self._edge_hint(idx=j, is_row=False, is_first=False, hint=hint)
+
     def solution(self):
         if not self.model.solve():
             return None
@@ -337,59 +370,46 @@ class Puzzle:
 
         print("Final answer (product of areas of empty regions):", solution)
 
+
 # Puzzle instances
 
-def example():
-    puzzle = Puzzle(5)
-    is_filled = puzzle.numbers.nonzero_view
+example = Puzzle(5)
+example.digit_hint(i=0, j=4, value=4)
+example.digit_hint(i=1, j=2, value=3)
+example.digit_hint(i=2, j=0, value=3)
+example.digit_hint(i=2, j=1, value=2)
+example.digit_hint(i=3, j=2, value=1)
+example.digit_hint(i=4, j=4, value=4)
+example.edge_hint_left(i=0, hint="U")
+example.edge_hint_right(i=1, hint="U")
+example.edge_hint_right(i=3, hint="F")
+example.edge_hint_left(i=4, hint="Y")
 
-    puzzle.model += cp.all([
-        puzzle.numbers[0, 4] == 4,
-        puzzle.numbers[1, 2] == 3,
-        puzzle.numbers[2, 0] == 3,
-        puzzle.numbers[2, 1] == 2,
-        puzzle.numbers[3, 2] == 1,
-        puzzle.numbers[4, 4] == 4,
-        puzzle.pentominos["U"].grid[0, is_filled.first_row_idx(0)] > 0,
-        puzzle.pentominos["U"].grid[1, is_filled.last_row_idx(1)] > 0,
-        puzzle.pentominos["F"].grid[3, is_filled.last_row_idx(3)] > 0,
-        puzzle.pentominos["Y"].grid[4, is_filled.first_row_idx(4)] > 0
-    ])
+hooks_11 = Puzzle(9)
+hooks_11.digit_hint(i=0, j=4, value=5)
+hooks_11.digit_hint(i=1, j=3, value=4)
+hooks_11.digit_hint(i=4, j=4, value=1)
+hooks_11.digit_hint(i=7, j=5, value=8)
+hooks_11.digit_hint(i=8, j=4, value=9)
+hooks_11.edge_hint_left(i=0, hint="I")
+hooks_11.edge_hint_right(i=0, hint="U")
+hooks_11.edge_hint_left(i=3, hint=6)
+hooks_11.edge_hint_right(i=3, hint="X")
+hooks_11.edge_hint_left(i=5, hint="N")
+hooks_11.edge_hint_right(i=5, hint=2)
+hooks_11.edge_hint_left(i=8, hint="Z")
+hooks_11.edge_hint_right(i=8, hint="V")
+hooks_11.edge_hint_top(j=2, hint=3)
+hooks_11.edge_hint_bottom(j=6, hint=7)
 
-    return puzzle
-
-def hooks_11():
-    puzzle = Puzzle(9)
-    is_filled = puzzle.numbers.nonzero_view
-
-    puzzle.model += cp.all([
-        puzzle.numbers[0, 4] == 5,
-        puzzle.numbers[1, 3] == 4,
-        puzzle.numbers[4, 4] == 1,
-        puzzle.numbers[7, 5] == 8,
-        puzzle.numbers[8, 4] == 9,
-        puzzle.pentominos["I"].grid[0, is_filled.first_row_idx(0)] > 0,
-        puzzle.pentominos["U"].grid[0, is_filled.last_row_idx(0)] > 0,
-        puzzle.pentominos["X"].grid[3, is_filled.last_row_idx(3)] > 0,
-        puzzle.pentominos["N"].grid[5, is_filled.first_row_idx(5)] > 0,
-        puzzle.pentominos["Z"].grid[8, is_filled.first_row_idx(8)] > 0,
-        puzzle.pentominos["V"].grid[8, is_filled.last_row_idx(8)] > 0,
-        puzzle.numbers[3, is_filled.first_row_idx(3)] == 6,
-        puzzle.numbers[5, is_filled.last_row_idx(5)] == 2,
-        puzzle.numbers[is_filled.last_col_idx(2), 2] == 3,
-        puzzle.numbers[is_filled.first_col_idx(6), 6] == 7
-    ])
-
-    return puzzle
 
 def main():
     print("Solving jane-street puzzle 2025-09 (Hooks 11)...")
-
     print("Example solution:")
-    example().print_solution()
+    example.print_solution()
     print()
     print("Puzzle solution:")
-    hooks_11().print_solution()
+    hooks_11.print_solution()
 
 if __name__ == "__main__":
     main()
