@@ -1,9 +1,16 @@
+# Python
 __pycache__/
 *.py[oc]
 build/
 dist/
 wheels/
 *.egg-info
-
 .venv
+
+# Nix and direnv
 .direnv
+result
+
+# Ad-hoc local files
+*.local
+*.local.*
