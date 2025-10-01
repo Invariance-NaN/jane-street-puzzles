@@ -2,15 +2,12 @@ import cpmpy as cp
 import numpy as np
 import typing
 from cpmpy.expressions.variables import NDVarArray
-from functools import cache
-from functools import cached_property
+from functools import cache, cached_property
 
 
 class IntGrid:
     @typing.overload
-    def __init__(
-        self, model: cp.Model, height: int, width: int, *, lb: int, ub: int
-    ): ...
+    def __init__(self, model: cp.Model, height: int, width: int, *, lb: int, ub: int): ...
     @typing.overload
     def __init__(self, model: cp.Model, height: int, width: int, *, _bools=False): ...
 
@@ -92,11 +89,17 @@ class IntGrid:
             for j in range(self.width)
         )
 
+    @cached_property
+    def total_sum(self) -> cp.expressions.core.Operator:
+        """
+        Returns a decision variable that is the sum of the values of all cells in the grid.
+        """
+        # Type override, since this never returns and `int`.
+        return cp.sum(self.cells) # type: ignore
 
 class BooleanGrid(IntGrid):
     def __init__(self, model: cp.Model, height: int, width: int):
         super().__init__(model, height, width, _bools=True)
-        self.cells = cp.boolvar(shape=(height, width))  # type: ignore
 
     @staticmethod
     def are_disjoint(grids: list["BooleanGrid"]):
@@ -203,15 +206,6 @@ class BooleanGrid(IntGrid):
         """
         return other.covers(self)
 
-    def is_empty(self):
-        """
-        Returns a decision variable that is true iff this grid is empty (all cells false).
-        """
-
-        return cp.all(
-            ~self[i, j] for i in range(self.height) for j in range(self.width)
-        )
-
     def each_implies(self, fn: typing.Callable[[int, int], typing.Any]):
         """
         Returns a decision variable that is true iff the given expression is true
@@ -226,12 +220,38 @@ class BooleanGrid(IntGrid):
             for j in range(self.width)
         )
 
+    @cached_property
+    def popcount(self):
+        """
+        Alias for `self.total_sum`, to reflect that the sum of all of the cells
+        in the grid is the number of true cells in the grid.
+        """
+        return self.total_sum
+
+    @cached_property
+    def is_empty(self):
+        """
+        Returns a decision variable that is true iff this grid is empty (all cells false).
+        """
+        return self.popcount == 0
+
+    @cached_property
     def is_connected(self):
         """
-        Ensures that all filled cells form an orthogonally-connected region
-        using a flow-based approach.
+        Returns a decision variable that is true iff the filled cells in this grid are orthogonally connected.
+        (This is true when there are no filled cells.)
         """
-        constraints = []
+
+        # We use the notion of flow to check connectivity.
+        # We put one unit of flow for each filled cell into the system (at the "root"),
+        # and require that every other cell has one more unit of inflow than outflow,
+        # which can only be the case if the flow stemming from the root can reach every filled cell.
+
+        # We pick one true cell to be the root, unless the grid is empty.
+        is_root = BooleanGrid(self.model, self.height, self.width)
+        self.model += (is_root.popcount <= 1) & is_root.is_empty.implies(self.is_empty)
+        self.model += is_root.each_implies(lambda i, j: self[i, j])
+
 
         def nieghbors(i, j):
             for di, dj in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
@@ -239,15 +259,7 @@ class BooleanGrid(IntGrid):
                 if 0 <= i2 < self.height and 0 <= j2 < self.width:
                     yield (i2, j2)
 
-        # We pick one true cell to be the root.
-        is_root: "NDVarArray" = cp.boolvar(shape=(self.height, self.width))  # type: ignore
-        constraints.append(cp.sum(is_root) == 1)
-
-        for i1 in range(self.height):
-            for j1 in range(self.width):
-                constraints.append(is_root[i1][j1].implies(self[i1][j1]))
-
-        # flow[i1, j1, i2, j2] is the amount of flow sent from cell (i1, j1) to (i2, j2)
+        # The amount of flow sent from cell (i1, j1) to (i2, j2) is denoted by `flow[i1, j1, i2, j2]`.
         flow = {
             (i1, j1, i2, j2): cp.intvar(0, self.height * self.width)
             for i1 in range(self.height)
@@ -255,33 +267,30 @@ class BooleanGrid(IntGrid):
             for i2, j2 in nieghbors(i1, j1)
         }
 
-        true_cell_count = cp.sum(self.cells)
+        @cache
+        def inflow(i, j):
+            return cp.sum(flow.get((i2, j2, i, j), 0) for i2, j2 in nieghbors(i, j))
 
-        for i1 in range(self.height):
-            for j1 in range(self.width):
-                inflow = cp.sum([
-                    flow.get((i2, j2, i1, j1), 0)
-                    for i2, j2 in nieghbors(i1, j1)
-                ])
+        @cache
+        def outflow(i, j):
+            return cp.sum(flow.get((i, j, i2, j2), 0) for i2, j2 in nieghbors(i, j))
 
-                outflow = cp.sum([
-                    flow.get((i1, j1, i2, j2), 0)
-                    for i2, j2 in nieghbors(i1, j1)
-                ])
+        flow_only_on_true_cells = cp.all(
+            ((inflow(i, j) != 0) | (outflow(i, j) != 0)).implies(self[i, j]) # type: ignore
+            for i in range(self.height)
+            for j in range(self.width)
+        )
 
-                # Only true cells can have flow
-                constraints.append(((inflow > 0) | (outflow > 0)).implies(self[i1, j1])) # type: ignore
+        flow_preserved = cp.all(
+            self[i, j].implies(
+                ( is_root[i, j] & (outflow(i, j) - inflow(i, j) == self.popcount - 1)) |
+                (~is_root[i, j] & (inflow(i, j) - outflow(i, j) == 1))
+            )
+            for i in range(self.height)
+            for j in range(self.width)
+        )
 
-                # Every filled cell has one more unit of inflow than outflow,
-                # with the exception of the root cell (which is the source of all flow).
-                constraints.append(
-                    self[i1, j1].implies(
-                        (is_root[i1][j1] & (outflow - inflow == true_cell_count - 1))
-                        | (~is_root[i1][j1] & (inflow - outflow == 1))
-                    )
-                )
-
-        return cp.all(constraints)
+        return flow_only_on_true_cells & flow_preserved
 
     def _first_true_idx(self, boolvars):
         """
@@ -291,10 +300,10 @@ class BooleanGrid(IntGrid):
 
         first = cp.intvar(-1, self.width - 1)
 
-        self.model += cp.any([
-            (first == -1) & (~cp.any(boolvars)),
-            (first != -1) & (boolvars[first] > 0) & cp.all((j < first).implies(~boolvars[j]) for j in range(len(boolvars)) )
-        ])
+        self.model += (
+            ((first == -1) & (~cp.any(boolvars))) |
+            ((first != -1) & (boolvars[first] > 0) & cp.all((j < first).implies(~boolvars[j]) for j in range(len(boolvars))))
+        )
 
         return first
 

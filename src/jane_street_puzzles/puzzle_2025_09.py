@@ -51,19 +51,17 @@ class Hook:
                     cp.all(vertical_bar_right)
                 ])
 
-class FilledHook:
+class MarkedHook:
     """
-    A `Hook` with a certain number of its cells (`self.filled_count`) filled in.
+    A `Hook` with `self.marked_count` of its cells "marked".
     """
     def __init__(self, model: cp.Model, hook_size: int, grid_width: int, grid_height: int, *, lb: int, ub: int) -> None:
         self.model = model
         self.hook = Hook(model, hook_size, grid_width, grid_height)
         self.grid = self.hook.grid
-        self.filled_grid = BooleanGrid(model, grid_height, grid_width)
-        self.filled_count = cp.intvar(lb, ub)
-
-        model += self.grid.covers(self.filled_grid)
-        model += cp.sum(self.filled_grid.cells) == self.filled_count
+        self.marked_grid = BooleanGrid(model, grid_height, grid_width)
+        self.marked_count = self.marked_grid.popcount
+        model += self.grid.covers(self.marked_grid)
 
 class OptionalPentomino:
     """
@@ -85,7 +83,7 @@ class OptionalPentomino:
         pos_i = cp.intvar(0, grid_width - 1)
         pos_j = cp.intvar(0, grid_height - 1)
 
-        model += (~self.is_placed).implies(self.grid.is_empty())
+        model += (~self.is_placed).implies(self.grid.is_empty)
 
         for idx, coords in enumerate(orientations):
             orientation_placed = self.is_placed & (orientation_idx == idx)
@@ -97,7 +95,7 @@ class OptionalPentomino:
             model += orientation_placed.implies(fits_in_grid)
 
             def cell_is_filled(i: int, j: int):
-                return cp.any(                    [
+                return cp.any([
                     (pos_i + coord_1 == i) & (pos_j + coord_2 == j)
                     for coord_1, coord_2 in coords
                 ])
@@ -121,22 +119,22 @@ class Puzzle:
         numbers = IntGrid(model, grid_size, grid_size, lb=0, ub=grid_size)
 
         # Create valid hooks
-        hooks = [FilledHook(model, hook_size, grid_size, grid_size, lb=1, ub=grid_size) for hook_size in range(1, grid_size + 1)]
+        hooks = [MarkedHook(model, hook_size, grid_size, grid_size, lb=1, ub=grid_size) for hook_size in range(1, grid_size + 1)]
         model += BooleanGrid.are_disjoint([hook.grid for hook in hooks])
-        model += cp.AllDifferent(hook.filled_count for hook in hooks)
+        model += cp.AllDifferent(hook.marked_count for hook in hooks)
 
         # Link hooks to numbers grid
         model += cp.all(
             (
-                hook.grid.excluding(hook.filled_grid).each_implies(lambda i, j: numbers[i, j] == 0) &
-                hook.filled_grid.each_implies(lambda i, j: numbers[i, j] == hook.filled_count)
+                hook.grid.excluding(hook.marked_grid).each_implies(lambda i, j: numbers[i, j] == 0) &
+                hook.marked_grid.each_implies(lambda i, j: numbers[i, j] == hook.marked_count)
             )
             for hook in hooks
         )
 
         # Constraints on the numbers grid
         model += no_2x2_block(numbers.nonzero_view)
-        model += numbers.nonzero_view.is_connected()
+        model += numbers.nonzero_view.is_connected
 
         pentominos = { name: OptionalPentomino(model, name, grid_size, grid_size) for name in PENTOMINOS.keys() }
         model += BooleanGrid.are_disjoint([pentomino.grid for pentomino in pentominos.values()])
@@ -271,10 +269,10 @@ class Puzzle:
         connects_left  = BooleanGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
         connects_right = BooleanGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
         printing_model.minimize(
-            cp.sum(connects_up.cells) +
-            cp.sum(connects_down.cells) +
-            cp.sum(connects_left.cells) +
-            cp.sum(connects_right.cells)
+            connects_up.popcount +
+            connects_down.popcount +
+            connects_left.popcount +
+            connects_right.popcount
         )
 
         vertical = BooleanGrid.intersection([connects_up, connects_down])
