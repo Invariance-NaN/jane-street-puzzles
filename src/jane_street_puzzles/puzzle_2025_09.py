@@ -2,6 +2,7 @@ import cpmpy as cp
 import math
 import numpy as np
 import rich
+import jane_street_puzzles.utils.cp as cpx
 from jane_street_puzzles.utils.grids import BooleanGrid, IntGrid
 from jane_street_puzzles.utils.polyominos import PENTOMINOS
 
@@ -44,11 +45,11 @@ class Hook:
                 ]
 
                 # Each cell is covered iff it is in one of the bars.
-                self.model += self.grid[i, j] == cp.any([
-                    cp.all(horizontal_bar_upper),
-                    cp.all(horizontal_bar_lower),
-                    cp.all(vertical_bar_left),
-                    cp.all(vertical_bar_right)
+                self.model += self.grid[i, j] == cpx.any([
+                    cpx.all(horizontal_bar_upper),
+                    cpx.all(horizontal_bar_lower),
+                    cpx.all(vertical_bar_left),
+                    cpx.all(vertical_bar_right)
                 ])
 
 class MarkedHook:
@@ -95,7 +96,7 @@ class OptionalPentomino:
             model += orientation_placed.implies(fits_in_grid)
 
             def cell_is_filled(i: int, j: int):
-                return cp.any([
+                return cpx.any([
                     (pos_i + coord_1 == i) & (pos_j + coord_2 == j)
                     for coord_1, coord_2 in coords
                 ])
@@ -103,13 +104,11 @@ class OptionalPentomino:
             model += orientation_placed.implies(self.grid.each_eq(cell_is_filled))
 
 def no_2x2_block(grid: BooleanGrid):
-    return cp.all(
-        [
-            cp.sum([grid[i, j], grid[i, j + 1], grid[i + 1, j], grid[i + 1, j + 1]]) <= 3
-            for i in range(grid.width - 1)
-            for j in range(grid.height - 1)
-        ]
-    )
+    return cpx.all([
+        cpx.sum([grid[i, j], grid[i, j + 1], grid[i + 1, j], grid[i + 1, j + 1]]) <= 3
+        for i in range(grid.width - 1)
+        for j in range(grid.height - 1)
+    ])
 
 class Puzzle:
     def __init__(self, grid_size: int):
@@ -124,7 +123,7 @@ class Puzzle:
         model += cp.AllDifferent(hook.marked_count for hook in hooks)
 
         # Link hooks to numbers grid
-        model += cp.all(
+        model += cpx.all(
             (
                 hook.grid.excluding(hook.marked_grid).each_implies(lambda i, j: numbers[i, j] == 0) &
                 hook.marked_grid.each_implies(lambda i, j: numbers[i, j] == hook.marked_count)
@@ -146,7 +145,7 @@ class Puzzle:
         for pentomino in pentominos.values():
             # Ensure the numbers in the pentomino sum to a multiple of 5.
             # (If the pentomino isn't placed, then the sum will be 0 and hence a multiple of 5.)
-            pentomino_sum = cp.sum(
+            pentomino_sum = cpx.sum(
                 [
                     pentomino.grid[i, j] * numbers[i, j]
                     for i in range(grid_size)
@@ -279,13 +278,13 @@ class Puzzle:
         horizontal = BooleanGrid.intersection([connects_left, connects_right])
         has_box_char = BooleanGrid.union([connects_up, connects_down, connects_left, connects_right])
 
-        printing_model += cp.all([
+        printing_model += cpx.all([
             connects_down[i, j] == connects_up[i + 1, j]
             for i in range(self.grid_size * 2)
             for j in range(self.grid_size * 4 + 1)
         ])
 
-        printing_model += cp.all([
+        printing_model += cpx.all([
             connects_right[i, j] == connects_left[i, j + 1]
             for i in range(self.grid_size * 2 + 1)
             for j in range(self.grid_size * 4)

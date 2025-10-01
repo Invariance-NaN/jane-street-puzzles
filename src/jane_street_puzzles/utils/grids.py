@@ -3,7 +3,7 @@ import numpy as np
 import typing
 from cpmpy.expressions.variables import NDVarArray
 from functools import cache, cached_property
-
+import jane_street_puzzles.utils.cp as cpx
 
 class IntGrid:
     @typing.overload
@@ -64,7 +64,7 @@ class IntGrid:
         """
 
         nonzero_grid = BooleanGrid(self.model, self.height, self.width)
-        self.model += cp.all(
+        self.model += cpx.all(
             nonzero_grid[i, j] == (self[i, j] > 0)
             for i in range(self.height)
             for j in range(self.width)
@@ -83,19 +83,18 @@ class IntGrid:
         The function is passed the coordinates of the cell.
         """
 
-        return cp.all(
+        return cpx.all(
             self[i, j] == fn(i, j)
             for i in range(self.height)
             for j in range(self.width)
         )
 
     @cached_property
-    def total_sum(self) -> cp.expressions.core.Operator:
+    def total_sum(self):
         """
         Returns a decision variable that is the sum of the values of all cells in the grid.
         """
-        # Type override, since this never returns and `int`.
-        return cp.sum(self.cells) # type: ignore
+        return cpx.sum(self.cells)
 
 class BooleanGrid(IntGrid):
     def __init__(self, model: cp.Model, height: int, width: int):
@@ -110,8 +109,8 @@ class BooleanGrid(IntGrid):
 
         _, height, width = BooleanGrid._grid_list_helper(grids)
 
-        return cp.all(
-            cp.sum(grid[i, j] for grid in grids) <= 1
+        return cpx.all(
+            cpx.sum(grid[i, j] for grid in grids) <= 1
             for i in range(height)
             for j in range(width)
         )
@@ -127,8 +126,8 @@ class BooleanGrid(IntGrid):
 
         union_grid = BooleanGrid(model, height, width)
 
-        model += cp.all(
-            union_grid[i, j] == cp.any(grid[i, j] for grid in grids)
+        model += cpx.all(
+            union_grid[i, j] == cpx.any(grid[i, j] for grid in grids)
             for i in range(height)
             for j in range(width)
         )
@@ -146,8 +145,8 @@ class BooleanGrid(IntGrid):
 
         intersection_grid = BooleanGrid(model, height, width)
 
-        model += cp.all(
-            intersection_grid[i, j] == cp.all(grid[i, j] for grid in grids)
+        model += cpx.all(
+            intersection_grid[i, j] == cpx.all(grid[i, j] for grid in grids)
             for i in range(height)
             for j in range(width)
         )
@@ -163,7 +162,7 @@ class BooleanGrid(IntGrid):
 
         _, height, width = BooleanGrid._grid_list_helper([lhs, rhs])
 
-        return cp.all(
+        return cpx.all(
             lhs[i, j] == rhs[i, j]
             for i in range(height)
             for j in range(width)
@@ -179,7 +178,7 @@ class BooleanGrid(IntGrid):
 
         excluding_grid = BooleanGrid(self.model, height, width)
 
-        self.model += cp.all(
+        self.model += cpx.all(
             excluding_grid[i, j] == (self[i, j] & ~other[i, j])
             for i in range(height)
             for j in range(width)
@@ -195,7 +194,7 @@ class BooleanGrid(IntGrid):
 
         _, height, width = BooleanGrid._grid_list_helper([self, other])
 
-        return cp.all(
+        return cpx.all(
             other[i, j].implies(self[i, j]) for i in range(height) for j in range(width)
         )
 
@@ -214,7 +213,7 @@ class BooleanGrid(IntGrid):
         The function is passed the coordinates of the cell.
         """
 
-        return cp.all(
+        return cpx.all(
             self[i, j].implies(fn(i, j))
             for i in range(self.height)
             for j in range(self.width)
@@ -236,7 +235,7 @@ class BooleanGrid(IntGrid):
         return self.popcount == 0
 
     @cached_property
-    def is_connected(self):
+    def is_connected(self) -> cp.expressions.core.Expression:
         """
         Returns a decision variable that is true iff the filled cells in this grid are orthogonally connected.
         (This is true when there are no filled cells.)
@@ -269,19 +268,19 @@ class BooleanGrid(IntGrid):
 
         @cache
         def inflow(i, j):
-            return cp.sum(flow.get((i2, j2, i, j), 0) for i2, j2 in nieghbors(i, j))
+            return cpx.sum(flow.get((i2, j2, i, j), cpx.zero) for i2, j2 in nieghbors(i, j))
 
         @cache
         def outflow(i, j):
-            return cp.sum(flow.get((i, j, i2, j2), 0) for i2, j2 in nieghbors(i, j))
+            return cpx.sum(flow.get((i, j, i2, j2), cpx.zero) for i2, j2 in nieghbors(i, j))
 
-        flow_only_on_true_cells = cp.all(
-            ((inflow(i, j) != 0) | (outflow(i, j) != 0)).implies(self[i, j]) # type: ignore
+        flow_only_on_true_cells = cpx.all(
+            ((inflow(i, j) != 0) | (outflow(i, j) != 0)).implies(self[i, j])
             for i in range(self.height)
             for j in range(self.width)
         )
 
-        flow_preserved = cp.all(
+        flow_preserved = cpx.all(
             self[i, j].implies(
                 ( is_root[i, j] & (outflow(i, j) - inflow(i, j) == self.popcount - 1)) |
                 (~is_root[i, j] & (inflow(i, j) - outflow(i, j) == 1))
@@ -301,8 +300,8 @@ class BooleanGrid(IntGrid):
         first = cp.intvar(-1, self.width - 1)
 
         self.model += (
-            ((first == -1) & (~cp.any(boolvars))) |
-            ((first != -1) & (boolvars[first] > 0) & cp.all((j < first).implies(~boolvars[j]) for j in range(len(boolvars))))
+            ((first == -1) & (~cpx.any(boolvars))) |
+            ((first != -1) & (boolvars[first] > 0) & cpx.all((j < first).implies(~boolvars[j]) for j in range(len(boolvars))))
         )
 
         return first
