@@ -22,35 +22,34 @@ class Hook:
         hook_i = cp.intvar(0, grid_height - self.hook_size)
         hook_j = cp.intvar(0, grid_width - self.hook_size)
 
-        for i in range(grid_height):
-            for j in range(grid_width):
-                horizontal_bar_upper = [
-                    upper_not_lower,
-                    i == hook_i, hook_j <= j, j < hook_j + self.hook_size,
-                ]
+        for i, j in self.grid.indices():
+            horizontal_bar_upper = [
+                upper_not_lower,
+                i == hook_i, hook_j <= j, j < hook_j + self.hook_size,
+            ]
 
-                horizontal_bar_lower = [
-                    ~upper_not_lower,
-                    i == hook_i + self.hook_size - 1, hook_j <= j, j < hook_j + self.hook_size,
-                ]
+            horizontal_bar_lower = [
+                ~upper_not_lower,
+                i == hook_i + self.hook_size - 1, hook_j <= j, j < hook_j + self.hook_size,
+            ]
 
-                vertical_bar_left = [
-                    left_not_right,
-                    j == hook_j, hook_i <= i, i < hook_i + self.hook_size,
-                ]
+            vertical_bar_left = [
+                left_not_right,
+                j == hook_j, hook_i <= i, i < hook_i + self.hook_size,
+            ]
 
-                vertical_bar_right = [
-                    ~left_not_right,
-                    j == hook_j + self.hook_size - 1, hook_i <= i, i < hook_i + self.hook_size,
-                ]
+            vertical_bar_right = [
+                ~left_not_right,
+                j == hook_j + self.hook_size - 1, hook_i <= i, i < hook_i + self.hook_size,
+            ]
 
-                # Each cell is covered iff it is in one of the bars.
-                self.model += self.grid[i, j] == cpx.any([
-                    cpx.all(horizontal_bar_upper),
-                    cpx.all(horizontal_bar_lower),
-                    cpx.all(vertical_bar_left),
-                    cpx.all(vertical_bar_right)
-                ])
+            # Each cell is covered iff it is in one of the bars.
+            self.model += self.grid[i, j] == cpx.any([
+                cpx.all(horizontal_bar_upper),
+                cpx.all(horizontal_bar_lower),
+                cpx.all(vertical_bar_left),
+                cpx.all(vertical_bar_right)
+            ])
 
 class MarkedHook:
     """
@@ -148,8 +147,7 @@ class Puzzle:
             pentomino_sum = cpx.sum(
                 [
                     pentomino.grid[i, j] * numbers[i, j]
-                    for i in range(grid_size)
-                    for j in range(grid_size)
+                    for i, j in numbers.indices()
                 ]
             )
             model += pentomino_sum % 5 == 0
@@ -224,8 +222,7 @@ class Puzzle:
 
         areas = [
             flood_fill(i, j)
-            for i in range(self.grid_size)
-            for j in range(self.grid_size)
+            for i, j in self.numbers.nonzero_view.indices()
         ]
 
         return math.prod(x for x in areas if x != 0)

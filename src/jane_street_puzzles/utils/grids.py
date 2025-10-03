@@ -39,9 +39,12 @@ class IntGrid:
         return self.cells[idx]
 
     @staticmethod
-    def _grid_list_helper(
-        grids: typing.Sequence["IntGrid"],
-    ) -> tuple[cp.Model, int, int]:
+    def _grid_list_helper(grids: typing.Sequence["IntGrid"]) -> 'IntGrid':
+        """
+        Ensures that a given non-empty list of grids are all compatible (same model and dimensions),
+        and returns one of the grids.
+        """
+
         assert len(grids) > 0, "At least one grid is required"
 
         model = grids[0].model
@@ -55,7 +58,7 @@ class IntGrid:
             "All grids must have the same dimensions"
         )
 
-        return model, height, width
+        return grids[0]
 
     @cached_property
     def nonzero_view(self) -> "BooleanGrid":
@@ -66,8 +69,7 @@ class IntGrid:
         nonzero_grid = BooleanGrid(self.model, self.height, self.width)
         self.model += cpx.all(
             nonzero_grid[i, j] == (self[i, j] > 0)
-            for i in range(self.height)
-            for j in range(self.width)
+            for i, j in self.indices()
         )
         return nonzero_grid
 
@@ -85,8 +87,7 @@ class IntGrid:
 
         return cpx.all(
             self[i, j] == fn(i, j)
-            for i in range(self.height)
-            for j in range(self.width)
+            for i, j in self.indices()
         )
 
     @cached_property
@@ -94,7 +95,19 @@ class IntGrid:
         """
         Returns a decision variable that is the sum of the values of all cells in the grid.
         """
-        return cpx.sum(self.cells)
+        return cpx.sum(
+            self[i, j]
+            for i, j in self.indices()
+        )
+
+    def indices(self):
+        return ((i, j) for i in range(self.height) for j in range(self.width))
+
+    def neighbors(self, i: int, j: int):
+        for di, dj in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+            i2, j2 = i + di, j + dj
+            if 0 <= i2 < self.height and 0 <= j2 < self.width:
+                yield (i2, j2)
 
 class BooleanGrid(IntGrid):
     def __init__(self, model: cp.Model, height: int, width: int):
@@ -107,12 +120,11 @@ class BooleanGrid(IntGrid):
         The grids must all have the same dimensions.
         """
 
-        _, height, width = BooleanGrid._grid_list_helper(grids)
+        proto = BooleanGrid._grid_list_helper(grids)
 
         return cpx.all(
             cpx.sum(grid[i, j] for grid in grids) <= 1
-            for i in range(height)
-            for j in range(width)
+            for i, j in proto.indices()
         )
 
     @staticmethod
@@ -122,14 +134,13 @@ class BooleanGrid(IntGrid):
         The grids must all have the same dimensions and belong to the same model.
         """
 
-        model, height, width = BooleanGrid._grid_list_helper(grids)
+        proto = BooleanGrid._grid_list_helper(grids)
 
-        union_grid = BooleanGrid(model, height, width)
+        union_grid = BooleanGrid(proto.model, proto.height, proto.width)
 
-        model += cpx.all(
+        proto.model += cpx.all(
             union_grid[i, j] == cpx.any(grid[i, j] for grid in grids)
-            for i in range(height)
-            for j in range(width)
+            for i, j in proto.indices()
         )
 
         return union_grid
@@ -141,14 +152,13 @@ class BooleanGrid(IntGrid):
         The grids must all have the same dimensions and belong to the same model.
         """
 
-        model, height, width = BooleanGrid._grid_list_helper(grids)
+        proto = BooleanGrid._grid_list_helper(grids)
 
-        intersection_grid = BooleanGrid(model, height, width)
+        intersection_grid = BooleanGrid(proto.model, proto.height, proto.width)
 
-        model += cpx.all(
+        proto.model += cpx.all(
             intersection_grid[i, j] == cpx.all(grid[i, j] for grid in grids)
-            for i in range(height)
-            for j in range(width)
+            for i, j in proto.indices()
         )
 
         return intersection_grid
@@ -160,12 +170,11 @@ class BooleanGrid(IntGrid):
         The grids must have the same dimensions and belong to the same model.
         """
 
-        _, height, width = BooleanGrid._grid_list_helper([lhs, rhs])
+        proto = BooleanGrid._grid_list_helper([lhs, rhs])
 
         return cpx.all(
             lhs[i, j] == rhs[i, j]
-            for i in range(height)
-            for j in range(width)
+            for i, j in proto.indices()
         )
 
     def excluding(self, other: "BooleanGrid") -> "BooleanGrid":
@@ -174,14 +183,13 @@ class BooleanGrid(IntGrid):
         The grids must have the same dimensions and belong to the same model.
         """
 
-        _, height, width = BooleanGrid._grid_list_helper([self, other])
+        proto = BooleanGrid._grid_list_helper([self, other])
 
-        excluding_grid = BooleanGrid(self.model, height, width)
+        excluding_grid = BooleanGrid(proto.model, proto.height, proto.width)
 
-        self.model += cpx.all(
+        proto.model += cpx.all(
             excluding_grid[i, j] == (self[i, j] & ~other[i, j])
-            for i in range(height)
-            for j in range(width)
+            for i, j in proto.indices()
         )
 
         return excluding_grid
@@ -192,10 +200,10 @@ class BooleanGrid(IntGrid):
         The grids must have the same dimensions and belong to the same model.
         """
 
-        _, height, width = BooleanGrid._grid_list_helper([self, other])
+        proto = BooleanGrid._grid_list_helper([self, other])
 
         return cpx.all(
-            other[i, j].implies(self[i, j]) for i in range(height) for j in range(width)
+            other[i, j].implies(self[i, j]) for i, j in proto.indices()
         )
 
     def covered_by(self, other: "BooleanGrid"):
@@ -215,8 +223,7 @@ class BooleanGrid(IntGrid):
 
         return cpx.all(
             self[i, j].implies(fn(i, j))
-            for i in range(self.height)
-            for j in range(self.width)
+            for i, j in self.indices()
         )
 
     @cached_property
@@ -235,61 +242,100 @@ class BooleanGrid(IntGrid):
         return self.popcount == 0
 
     @cached_property
-    def is_connected(self) -> cp.expressions.core.Expression:
+    def _ensure_connected(self):
         """
-        Returns a decision variable that is true iff the filled cells in this grid are orthogonally connected.
-        (This is true when there are no filled cells.)
+        Returns a decision variable that is true only if the true cells in
+        this grid are orthogonally connected.
+
+        The variable can be false even if the grid is connected.
         """
 
         # We use the notion of flow to check connectivity.
-        # We put one unit of flow for each filled cell into the system (at the "root"),
+        # We put one unit of flow for each true cell into the system (at the "root"),
         # and require that every other cell has one more unit of inflow than outflow,
-        # which can only be the case if the flow stemming from the root can reach every filled cell.
+        # which can only be the case if the flow stemming from the root can reach every true cell.
 
         # We pick one true cell to be the root, unless the grid is empty.
         is_root = BooleanGrid(self.model, self.height, self.width)
         self.model += (is_root.popcount <= 1) & is_root.is_empty.implies(self.is_empty)
         self.model += is_root.each_implies(lambda i, j: self[i, j])
 
-
-        def nieghbors(i, j):
-            for di, dj in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                i2, j2 = i + di, j + dj
-                if 0 <= i2 < self.height and 0 <= j2 < self.width:
-                    yield (i2, j2)
-
         # The amount of flow sent from cell (i1, j1) to (i2, j2) is denoted by `flow[i1, j1, i2, j2]`.
         flow = {
             (i1, j1, i2, j2): cp.intvar(0, self.height * self.width)
-            for i1 in range(self.height)
-            for j1 in range(self.width)
-            for i2, j2 in nieghbors(i1, j1)
+            for i1, j1 in self.indices()
+            for i2, j2 in self.neighbors(i1, j1)
         }
 
         @cache
         def inflow(i, j):
-            return cpx.sum(flow.get((i2, j2, i, j), cpx.zero) for i2, j2 in nieghbors(i, j))
+            return cpx.sum(flow.get((i2, j2, i, j), cpx.zero) for i2, j2 in self.neighbors(i, j))
 
         @cache
         def outflow(i, j):
-            return cpx.sum(flow.get((i, j, i2, j2), cpx.zero) for i2, j2 in nieghbors(i, j))
+            return cpx.sum(flow.get((i, j, i2, j2), cpx.zero) for i2, j2 in self.neighbors(i, j))
 
         flow_only_on_true_cells = cpx.all(
             ((inflow(i, j) != 0) | (outflow(i, j) != 0)).implies(self[i, j])
-            for i in range(self.height)
-            for j in range(self.width)
+            for i, j in self.indices()
         )
+
+        self.model += flow_only_on_true_cells
 
         flow_preserved = cpx.all(
             self[i, j].implies(
                 ( is_root[i, j] & (outflow(i, j) - inflow(i, j) == self.popcount - 1)) |
                 (~is_root[i, j] & (inflow(i, j) - outflow(i, j) == 1))
             )
-            for i in range(self.height)
-            for j in range(self.width)
+            for i, j in self.indices()
         )
 
-        return flow_only_on_true_cells & flow_preserved
+        return flow_preserved
+
+    @cached_property
+    def _ensure_disconnected(self):
+        """
+        Returns a decision variable that is true only if the true cells in
+        this grid are NOT orthogonally connected.
+
+        The variable can be false even if the grid is connected.
+        """
+
+        # A graph is disconnected iff it can be partitioned into two non-empty sets
+        # such that any two adjacent vertices are in the same set.
+
+        # Partition B is implicitly the cells that are true in `self` but not in `partition_A`
+        partition_A = BooleanGrid(self.model, self.height, self.width)
+        self.model += self.covers(partition_A)
+
+        partition_A_nonempty = partition_A.popcount >= 1
+        partition_B_nonempty = (self.popcount - partition_A.popcount) >= 1
+
+        no_cross_edges = cpx.all(
+            partition_A[i1, j1].implies(
+                cpx.all(
+                    (~self[i2, j2]) | partition_A[i2, j2]
+                    for i2, j2 in self.neighbors(i1, j1)
+                )
+            )
+            for i1, j1 in self.indices()
+        )
+
+        return partition_A_nonempty & partition_B_nonempty & no_cross_edges
+
+
+    @cached_property
+    def is_connected(self):
+        """
+        Returns a decision variable that is true if and only if the true cells in
+        this grid are orthogonally connected.
+        """
+        result = cp.boolvar()
+        self.model += result.implies(self._ensure_connected) & (~result).implies(self._ensure_disconnected)
+
+        return result
+
+
 
     def _first_true_idx(self, boolvars):
         """
