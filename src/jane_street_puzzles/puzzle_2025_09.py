@@ -95,19 +95,19 @@ class OptionalPentomino:
             model += orientation_placed.implies(fits_in_grid)
 
             def cell_is_filled(i: int, j: int):
-                return cpx.any([
+                return cpx.any(
                     (pos_i + coord_1 == i) & (pos_j + coord_2 == j)
                     for coord_1, coord_2 in coords
-                ])
+                )
 
             model += orientation_placed.implies(self.grid.each_eq(cell_is_filled))
 
 def no_2x2_block(grid: BoolGrid):
-    return cpx.all([
+    return cpx.all(
         cpx.sum([grid[i, j], grid[i, j + 1], grid[i + 1, j], grid[i + 1, j + 1]]) <= 3
         for i in range(grid.width - 1)
         for j in range(grid.height - 1)
-    ])
+    )
 
 class Puzzle:
     def __init__(self, grid_size: int):
@@ -145,10 +145,8 @@ class Puzzle:
             # Ensure the numbers in the pentomino sum to a multiple of 5.
             # (If the pentomino isn't placed, then the sum will be 0 and hence a multiple of 5.)
             pentomino_sum = cpx.sum(
-                [
-                    pentomino.grid[i, j] * numbers[i, j]
-                    for i, j in numbers.indices()
-                ]
+                pentomino.grid[i, j] * numbers[i, j]
+                for i, j in numbers.indices()
             )
             model += pentomino_sum % 5 == 0
 
@@ -275,17 +273,17 @@ class Puzzle:
         horizontal = BoolGrid.intersection([connects_left, connects_right])
         has_box_char = BoolGrid.union([connects_up, connects_down, connects_left, connects_right])
 
-        printing_model += cpx.all([
+        printing_model += cpx.all(
             connects_down[i, j] == connects_up[i + 1, j]
             for i in range(self.grid_size * 2)
             for j in range(self.grid_size * 4 + 1)
-        ])
+        )
 
-        printing_model += cpx.all([
+        printing_model += cpx.all(
             connects_right[i, j] == connects_left[i, j + 1]
             for i in range(self.grid_size * 2 + 1)
             for j in range(self.grid_size * 4)
-        ])
+        )
 
         output_grid = np.array([
             [" " for _ in range(self.grid_size * 4 + 1)]
