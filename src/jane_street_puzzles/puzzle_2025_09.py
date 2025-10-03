@@ -3,7 +3,7 @@ import math
 import numpy as np
 import rich
 import jane_street_puzzles.utils.cp as cpx
-from jane_street_puzzles.utils.grids import BooleanGrid, IntGrid
+from jane_street_puzzles.utils.grids import BoolGrid, IntGrid
 from jane_street_puzzles.utils.polyominos import PENTOMINOS
 
 class Hook:
@@ -12,7 +12,7 @@ class Hook:
     """
     def __init__(self, model: cp.Model, hook_size: int, grid_width: int, grid_height: int) -> None:
         self.model = model
-        self.grid = BooleanGrid(model, grid_height, grid_width)
+        self.grid = BoolGrid(model, grid_height, grid_width)
         self.hook_size = hook_size
 
         upper_not_lower = cp.boolvar()
@@ -59,7 +59,7 @@ class MarkedHook:
         self.model = model
         self.hook = Hook(model, hook_size, grid_width, grid_height)
         self.grid = self.hook.grid
-        self.marked_grid = BooleanGrid(model, grid_height, grid_width)
+        self.marked_grid = BoolGrid(model, grid_height, grid_width)
         self.marked_count = self.marked_grid.popcount
         model += self.grid.covers(self.marked_grid)
 
@@ -74,7 +74,7 @@ class OptionalPentomino:
         self.model = model
         self.pentomino_name = pentomino_name
 
-        self.grid = BooleanGrid(model, grid_height, grid_width)
+        self.grid = BoolGrid(model, grid_height, grid_width)
         self.is_placed = cp.boolvar()
 
         orientations = PENTOMINOS[pentomino_name]
@@ -102,7 +102,7 @@ class OptionalPentomino:
 
             model += orientation_placed.implies(self.grid.each_eq(cell_is_filled))
 
-def no_2x2_block(grid: BooleanGrid):
+def no_2x2_block(grid: BoolGrid):
     return cpx.all([
         cpx.sum([grid[i, j], grid[i, j + 1], grid[i + 1, j], grid[i + 1, j + 1]]) <= 3
         for i in range(grid.width - 1)
@@ -118,7 +118,7 @@ class Puzzle:
 
         # Create valid hooks
         hooks = [MarkedHook(model, hook_size, grid_size, grid_size, lb=1, ub=grid_size) for hook_size in range(1, grid_size + 1)]
-        model += BooleanGrid.are_disjoint([hook.grid for hook in hooks])
+        model += BoolGrid.are_disjoint([hook.grid for hook in hooks])
         model += cp.AllDifferent(hook.marked_count for hook in hooks)
 
         # Link hooks to numbers grid
@@ -135,9 +135,9 @@ class Puzzle:
         model += numbers.nonzero_view.is_connected
 
         pentominos = { name: OptionalPentomino(model, name, grid_size, grid_size) for name in PENTOMINOS.keys() }
-        model += BooleanGrid.are_disjoint([pentomino.grid for pentomino in pentominos.values()])
-        model += BooleanGrid.equals(
-            BooleanGrid.union([pentomino.grid for pentomino in pentominos.values()]),
+        model += BoolGrid.are_disjoint([pentomino.grid for pentomino in pentominos.values()])
+        model += BoolGrid.equals(
+            BoolGrid.union([pentomino.grid for pentomino in pentominos.values()]),
             numbers.nonzero_view
         )
 
@@ -260,10 +260,10 @@ class Puzzle:
             return
 
         printing_model = cp.Model()
-        connects_up    = BooleanGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
-        connects_down  = BooleanGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
-        connects_left  = BooleanGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
-        connects_right = BooleanGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
+        connects_up    = BoolGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
+        connects_down  = BoolGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
+        connects_left  = BoolGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
+        connects_right = BoolGrid(printing_model, self.grid_size * 2 + 1, self.grid_size * 4 + 1)
         printing_model.minimize(
             connects_up.popcount +
             connects_down.popcount +
@@ -271,9 +271,9 @@ class Puzzle:
             connects_right.popcount
         )
 
-        vertical = BooleanGrid.intersection([connects_up, connects_down])
-        horizontal = BooleanGrid.intersection([connects_left, connects_right])
-        has_box_char = BooleanGrid.union([connects_up, connects_down, connects_left, connects_right])
+        vertical = BoolGrid.intersection([connects_up, connects_down])
+        horizontal = BoolGrid.intersection([connects_left, connects_right])
+        has_box_char = BoolGrid.union([connects_up, connects_down, connects_left, connects_right])
 
         printing_model += cpx.all([
             connects_down[i, j] == connects_up[i + 1, j]

@@ -61,12 +61,12 @@ class IntGrid:
         return grids[0]
 
     @cached_property
-    def nonzero_view(self) -> "BooleanGrid":
+    def nonzero_view(self) -> "BoolGrid":
         """
-        Returns a BooleanGrid where each cell is true iff the corresponding cell in this grid is non-zero.
+        Returns a `BoolGrid` where each cell is true iff the corresponding cell in this grid is non-zero.
         """
 
-        nonzero_grid = BooleanGrid(self.model, self.height, self.width)
+        nonzero_grid = BoolGrid(self.model, self.height, self.width)
         self.model += cpx.all(
             nonzero_grid[i, j] == (self[i, j] > 0)
             for i, j in self.indices()
@@ -109,18 +109,18 @@ class IntGrid:
             if 0 <= i2 < self.height and 0 <= j2 < self.width:
                 yield (i2, j2)
 
-class BooleanGrid(IntGrid):
+class BoolGrid(IntGrid):
     def __init__(self, model: cp.Model, height: int, width: int):
         super().__init__(model, height, width, _bools=True)
 
     @staticmethod
-    def are_disjoint(grids: list["BooleanGrid"]):
+    def are_disjoint(grids: list["BoolGrid"]):
         """
         Returns a decision variable that is true iff all given boolean grids are disjoint.
         The grids must all have the same dimensions.
         """
 
-        proto = BooleanGrid._grid_list_helper(grids)
+        proto = BoolGrid._grid_list_helper(grids)
 
         return cpx.all(
             cpx.sum(grid[i, j] for grid in grids) <= 1
@@ -128,15 +128,15 @@ class BooleanGrid(IntGrid):
         )
 
     @staticmethod
-    def union(grids: list["BooleanGrid"]) -> "BooleanGrid":
+    def union(grids: list["BoolGrid"]) -> "BoolGrid":
         """
-        Returns a new BooleanGrid that is the union of the given grids (cellwise logical or).
+        Returns a new `BoolGrid` that is the union of the given grids (cellwise logical or).
         The grids must all have the same dimensions and belong to the same model.
         """
 
-        proto = BooleanGrid._grid_list_helper(grids)
+        proto = BoolGrid._grid_list_helper(grids)
 
-        union_grid = BooleanGrid(proto.model, proto.height, proto.width)
+        union_grid = BoolGrid(proto.model, proto.height, proto.width)
 
         proto.model += cpx.all(
             union_grid[i, j] == cpx.any(grid[i, j] for grid in grids)
@@ -146,15 +146,15 @@ class BooleanGrid(IntGrid):
         return union_grid
 
     @staticmethod
-    def intersection(grids: list["BooleanGrid"]) -> "BooleanGrid":
+    def intersection(grids: list["BoolGrid"]) -> "BoolGrid":
         """
-        Returns a new BooleanGrid that is the intersection of the given grids (cellwise logical and).
+        Returns a new `BoolGrid` that is the intersection of the given grids (cellwise logical and).
         The grids must all have the same dimensions and belong to the same model.
         """
 
-        proto = BooleanGrid._grid_list_helper(grids)
+        proto = BoolGrid._grid_list_helper(grids)
 
-        intersection_grid = BooleanGrid(proto.model, proto.height, proto.width)
+        intersection_grid = BoolGrid(proto.model, proto.height, proto.width)
 
         proto.model += cpx.all(
             intersection_grid[i, j] == cpx.all(grid[i, j] for grid in grids)
@@ -170,22 +170,22 @@ class BooleanGrid(IntGrid):
         The grids must have the same dimensions and belong to the same model.
         """
 
-        proto = BooleanGrid._grid_list_helper([lhs, rhs])
+        proto = BoolGrid._grid_list_helper([lhs, rhs])
 
         return cpx.all(
             lhs[i, j] == rhs[i, j]
             for i, j in proto.indices()
         )
 
-    def excluding(self, other: "BooleanGrid") -> "BooleanGrid":
+    def excluding(self, other: "BoolGrid") -> "BoolGrid":
         """
-        Returns a new BooleanGrid that is this grid excluding the other grid (cellwise logical and not).
+        Returns a new `BoolGrid` that is this grid excluding the other grid (cellwise logical and not).
         The grids must have the same dimensions and belong to the same model.
         """
 
-        proto = BooleanGrid._grid_list_helper([self, other])
+        proto = BoolGrid._grid_list_helper([self, other])
 
-        excluding_grid = BooleanGrid(proto.model, proto.height, proto.width)
+        excluding_grid = BoolGrid(proto.model, proto.height, proto.width)
 
         proto.model += cpx.all(
             excluding_grid[i, j] == (self[i, j] & ~other[i, j])
@@ -194,19 +194,19 @@ class BooleanGrid(IntGrid):
 
         return excluding_grid
 
-    def covers(self, other: "BooleanGrid"):
+    def covers(self, other: "BoolGrid"):
         """
         Returns a decision variable that is true iff this grid covers the other grid.
         The grids must have the same dimensions and belong to the same model.
         """
 
-        proto = BooleanGrid._grid_list_helper([self, other])
+        proto = BoolGrid._grid_list_helper([self, other])
 
         return cpx.all(
             other[i, j].implies(self[i, j]) for i, j in proto.indices()
         )
 
-    def covered_by(self, other: "BooleanGrid"):
+    def covered_by(self, other: "BoolGrid"):
         """
         Returns a decision variable that is true iff this grid is covered by the other grid.
         The grids must have the same dimensions and belong to the same model.
@@ -256,7 +256,7 @@ class BooleanGrid(IntGrid):
         # which can only be the case if the flow stemming from the root can reach every true cell.
 
         # We pick one true cell to be the root, unless the grid is empty.
-        is_root = BooleanGrid(self.model, self.height, self.width)
+        is_root = BoolGrid(self.model, self.height, self.width)
         self.model += (is_root.popcount <= 1) & is_root.is_empty.implies(self.is_empty)
         self.model += is_root.each_implies(lambda i, j: self[i, j])
 
@@ -305,7 +305,7 @@ class BooleanGrid(IntGrid):
         # such that any two adjacent vertices are in the same set.
 
         # Partition B is implicitly the cells that are true in `self` but not in `partition_A`
-        partition_A = BooleanGrid(self.model, self.height, self.width)
+        partition_A = BoolGrid(self.model, self.height, self.width)
         self.model += self.covers(partition_A)
 
         partition_A_nonempty = partition_A.popcount >= 1

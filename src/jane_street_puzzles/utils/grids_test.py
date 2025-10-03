@@ -1,6 +1,6 @@
 import pytest
 import cpmpy as cp
-from jane_street_puzzles.utils.grids import BooleanGrid
+from jane_street_puzzles.utils.grids import BoolGrid
 import hypothesis
 import hypothesis.strategies as st
 import hypothesis.extra.numpy as hnp
@@ -9,7 +9,7 @@ def make_grid(model, xss):
     height = len(xss)
     width = len(xss[0]) if height > 0 else 0
 
-    grid = BooleanGrid(model, height=height, width=width)
+    grid = BoolGrid(model, height=height, width=width)
     model += grid.each_eq(lambda i, j: xss[i][j])
 
     return grid
